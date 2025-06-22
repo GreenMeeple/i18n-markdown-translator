@@ -1,4 +1,4 @@
-# i18n-markdown-translator# i18n-md-translator
+# i18n-md-translator
 
 A command-line tool to translate Markdown files using the Microsoft Translator API. It preserves Markdown structure, including tables, code blocks, lists, and footnotes.
 

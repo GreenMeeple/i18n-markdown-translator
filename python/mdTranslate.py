@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import requests
 from lxml import html, etree
@@ -21,6 +22,22 @@ HEADERS = {
     "Ocp-Apim-Subscription-Region": REGION,
     "Content-Type": "application/json"
 }
+
+def extract_code_blocks(markdown):
+    code_blocks = []
+
+    def replacer(match):
+        code_blocks.append(match.group(0))
+        return f"[[[CODEBLOCK{len(code_blocks) - 1}]]]"
+
+    pattern = r"```[\w+-]*\n[\s\S]*?\n```"
+    modified_md = re.sub(pattern, replacer, markdown)
+    return modified_md, code_blocks
+
+def restore_code_blocks(text, code_blocks):
+    for i, block in enumerate(code_blocks):
+        text = text.replace(f"[[[CODEBLOCK{i}]]]", block)
+    return text
 
 def mdToHtml(input):
     # Initialize MarkdownIt with desired plugins
@@ -57,7 +74,7 @@ def mdToHtml(input):
     rawHtml = etree.tostring(tree, encoding='unicode', method='html')
     return rawHtml
 
-def translate_text(text: str, source_lang = 'en', target_lang = 'zh-Hans') -> str:
+def translate_text(text: str, source_lang = 'en', target_lang = 'yue') -> str:
     body = [{"Text": text}]
     try:
         response = requests.post(
@@ -72,17 +89,42 @@ def translate_text(text: str, source_lang = 'en', target_lang = 'zh-Hans') -> st
         print("Translation failed:", e)
         return text  # Fallback to original
 
-def mdTranslate(input = "./testcases/example.md", source_lang = 'en', target_lang = 'zh-Hans'):
+def mdTranslate(input = "./testcases/example.md", source_lang = 'en', target_lang = 'yue'):
+    # Read input
+    with open(input, "r", encoding="utf-8") as f:
+        content = f.read()
 
-    rawHtml = mdToHtml(input)
-    wrappedHtml = f"<html><body>{rawHtml}</body></html>"
+    # Extract and protect code blocks
+    safe_markdown, code_blocks = extract_code_blocks(content)
+
+    # Convert to HTML
+    md = (
+        MarkdownIt('commonmark', {'html': False, 'linkify': True, 'typographer': False})
+        .use(front_matter_plugin)
+        .use(footnote_plugin)
+        .use(tasklists_plugin)
+        .use(deflist_plugin)
+        .use(fieldlist_plugin)
+        .enable('table')
+        .enable('strikethrough')
+    )
+    raw_html = md.render(safe_markdown)
+    wrapped_html = f"<html><body>{raw_html}</body></html>"
+
+    # Translate content
     if target_lang == 'yue':
-        wrappedHtml = translate_text(wrappedHtml, source_lang, 'zh-Hant')
+        wrapped_html = translate_text(wrapped_html, source_lang, 'zh-Hant')
         source_lang = 'zh-Hant'
 
-    translated_html = translate_text(wrappedHtml, source_lang, target_lang)
+    translated_html = translate_text(wrapped_html, source_lang, target_lang)
 
+    # Convert back to markdown
     markdown_back = markdownify(translated_html)
+
+    # Restore code blocks
+    markdown_back = restore_code_blocks(markdown_back, code_blocks)
+
+    # Clean-up
     markdown_back = (
         markdown_back
         .replace('“', '"')
@@ -92,11 +134,10 @@ def mdTranslate(input = "./testcases/example.md", source_lang = 'en', target_lan
         .replace('）', ')')
         .replace('<表', '<table ')
         .replace('&lt;表','<table ')
-        .replace('*', '*')
     )
-    # Strip original .md extension and append target lang
-    base, _ = os.path.splitext(input)
-    output_path = f"{base}_{target_lang}.md"
 
+    # Write result
+    output_path = f"./{target_lang}/{input}"
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(markdown_back)
